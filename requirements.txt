@@ -1,0 +1,18 @@
+# Core LLM and RAG libraries
+langchain
+langchain-community
+
+# For using local/free models from Hugging Face
+sentence-transformers 
+
+# Vector Store
+faiss-cpu
+
+# Document Loaders
+pypdf 
+
+# Web Interface
+streamlit
+
+# For environment variables
+python-dotenv
