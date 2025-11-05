@@ -1,6 +1,9 @@
 # Core LLM and RAG libraries
 langchain
 langchain-community
+langchain-text-splitters
+langchain-openai 
+langchain.docstore.document 
 
 # For using local/free models from Hugging Face
 sentence-transformers 
@@ -10,6 +13,7 @@ faiss-cpu
 
 # Document Loaders
 pypdf 
+unstructured
 
 # Web Interface
 streamlit

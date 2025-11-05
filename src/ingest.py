@@ -4,11 +4,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
-# Define the path for the source documents and the vector store
 DATA_PATH = '../data'
 DB_FAISS_PATH = '../vectorstore/db_faiss'
 
-# --- 1. LOAD a variety of documents ---
 def load_documents(data_path):
     """
     Loads documents from the specified data path.
@@ -25,7 +23,6 @@ def load_documents(data_path):
             documents.extend(loader.load())
     return documents
 
-# --- 2. SPLIT the documents into smaller chunks ---
 def split_documents(documents):
     """
     Splits the documents into smaller chunks for processing.
@@ -34,7 +31,6 @@ def split_documents(documents):
     texts = text_splitter.split_documents(documents)
     return texts
 
-# --- 3. EMBED the text chunks into numerical vectors ---
 def create_embeddings():
     """
     Creates embeddings using a pre-trained model from Hugging Face.
