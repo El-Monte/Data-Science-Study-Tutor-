@@ -4,13 +4,21 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
-DATA_PATH = '../data'
-DB_FAISS_PATH = '../vectorstore/db_faiss'
+import os
 
+# Get the directory of the current script (e.g., .../src)
+script_dir = os.path.dirname(os.path.realpath(__file__))
+
+# Go up one level to the project's root directory (e.g., ...)
+project_root = os.path.dirname(script_dir)
+
+# Define the absolute paths
+DATA_PATH = os.path.join(project_root, 'data')
+DB_FAISS_PATH = os.path.join(project_root, 'vectorstore', 'db_faiss')
 def load_documents(data_path):
     """
     Loads documents from the specified data path.
-    Supports PDF and Markdown (.md, .txt) files.
+    Supports PDF, Markdown (.md, .txt), and Python (.py) files.
     """
     documents = []
     for filename in os.listdir(data_path):
@@ -18,7 +26,8 @@ def load_documents(data_path):
         if filename.endswith('.pdf'):
             loader = PyPDFLoader(file_path)
             documents.extend(loader.load())
-        elif filename.endswith(('.md', '.txt')):
+        # --- THIS IS THE MODIFIED LINE ---
+        elif filename.endswith(('.md', '.txt', '.py')): 
             loader = TextLoader(file_path, encoding='utf-8')
             documents.extend(loader.load())
     return documents
@@ -27,6 +36,8 @@ def split_documents(documents):
     """
     Splits the documents into smaller chunks for processing.
     """
+    # For code, we might want a different splitter, but RecursiveCharacterTextSplitter
+    # is robust and will work well enough for this project by splitting along lines and functions.
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     texts = text_splitter.split_documents(documents)
     return texts
@@ -35,15 +46,12 @@ def create_embeddings():
     """
     Creates embeddings using a pre-trained model from Hugging Face.
     """
-    # We will use a sentence-transformers model.
-    # It's powerful, free, and runs locally.
     embeddings = HuggingFaceEmbeddings(
         model_name='sentence-transformers/all-MiniLM-L6-v2',
-        model_kwargs={'device': 'cpu'} # Use CPU for compatibility
+        model_kwargs={'device': 'cpu'}
     )
     return embeddings
 
-# --- 4. STORE the embeddings in a FAISS vector store ---
 def create_vector_store(texts, embeddings):
     """
     Creates a FAISS vector store from the text chunks and embeddings.
@@ -52,20 +60,18 @@ def create_vector_store(texts, embeddings):
     db.save_local(DB_FAISS_PATH)
     return db
 
-# --- Main execution block ---
 def main():
     """
     Main function to run the data ingestion process.
     """
     print("Starting data ingestion process...")
 
-    # Load documents from all subdirectories in the data path
     all_documents = []
-    for folder in os.listdir(DATA_PATH):
-        folder_path = os.path.join(DATA_PATH, folder)
-        if os.path.isdir(folder_path):
-            print(f"Loading documents from: {folder_path}")
-            all_documents.extend(load_documents(folder_path))
+    # This loop needs to be able to go one level deeper for subfolders like 'langchain'
+    for root, dirs, files in os.walk(DATA_PATH):
+        print(f"Loading documents from: {root}")
+        # Pass the full root path to the loading function
+        all_documents.extend(load_documents(root))
 
     if not all_documents:
         print("No documents found. Please check your data directory.")
@@ -73,15 +79,12 @@ def main():
 
     print(f"Loaded {len(all_documents)} documents.")
 
-    # Split the documents into chunks
     texts = split_documents(all_documents)
     print(f"Split documents into {len(texts)} chunks.")
 
-    # Create embeddings
     embeddings = create_embeddings()
     print("Embeddings model loaded.")
 
-    # Create and save the vector store
     print("Creating and saving the vector store...")
     create_vector_store(texts, embeddings)
     print(f"Vector store created and saved at: {DB_FAISS_PATH}")
