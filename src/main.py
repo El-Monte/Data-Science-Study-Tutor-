@@ -14,7 +14,7 @@ load_dotenv()
 # --- 2. Configuration & Constants ---
 DB_FAISS_PATH = "vectorstore/db_faiss"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL = "gpt-3.5-turbo" # A powerful and cost-effective model
+LLM_MODEL = "gemini-pro" 
 
 # --- 3. The RAG Chain (The "Brain" of the App) ---
 def create_rag_chain():
