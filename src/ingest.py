@@ -3,7 +3,6 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-
 import os
 
 # Get the directory of the current script (e.g., .../src)
@@ -26,7 +25,6 @@ def load_documents(data_path):
         if filename.endswith('.pdf'):
             loader = PyPDFLoader(file_path)
             documents.extend(loader.load())
-        # --- THIS IS THE MODIFIED LINE ---
         elif filename.endswith(('.md', '.txt', '.py')): 
             loader = TextLoader(file_path, encoding='utf-8')
             documents.extend(loader.load())
