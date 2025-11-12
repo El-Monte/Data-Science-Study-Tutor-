@@ -1,5 +1,7 @@
 streamlit==1.35.0
 python-dotenv==1.0.1
+matplotlib
+seaborn
 
 # --- LangChain (Pinned to a known-good, modern, and stable set) ---
 langchain==0.2.1
