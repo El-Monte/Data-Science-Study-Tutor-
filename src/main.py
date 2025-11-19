@@ -16,12 +16,9 @@ from contextlib import redirect_stdout
 import re
 import seaborn as sns
 
-# --- 1. Load Environment Variables ---
 load_dotenv()
 matplotlib.use("Agg")
 
-
-# --- 2. Configuration & Constants ---
 DB_FAISS_PATH = "vectorstore/db_faiss"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 LLM_MODEL = "gemini-2.5-flash"
@@ -41,19 +38,21 @@ def create_chains():
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    # --- Chain 1: The RAG Tutor and Plotter (with a NEW, SIMPLER, MORE RELIABLE PROMPT) ---
     rag_template = """
     Your primary function is to act as a JSON API. You MUST respond with a single, valid JSON object and nothing else.
     The JSON object must have two keys: "explanation" and "code".
 
-    You are an expert Data Science tutor. Use the provided CONTEXT and CHAT HISTORY to answer the user's QUESTION.
-
+    You are an expert Data Science tutor. Your goal is to provide a comprehensive, detailed, and insightful answer to the user's QUESTION.
+    **CRITICAL LANGUAGE RULE: Your entire response, including all text in the 'explanation', MUST be in the same language as the user's most recent QUESTION. Disregard the language of the previous CHAT HISTORY when deciding the language for your answer.**
+    
     **Instructions for JSON content:**
-    1.  The "explanation" value must be a clear, expert-level textual answer to the QUESTION.
-    2.  If the QUESTION explicitly asks for a "plot", "graph", "chart", "visualization", or "diagram", you MUST generate complete, runnable Python code to create that visualization in the "code" value. The code must use Matplotlib and create a figure object named 'fig'.
-    3.  If the QUESTION asks for a non-plotting code example (like a function or a script), you MUST generate that code in the "code" value.
-    4.  If the QUESTION is purely conceptual and does not imply a need for any code, the "code" value MUST be an empty string ("").
-    5.  The "explanation" should be self-contained. Do NOT refer to the code (e.g., do not say "the code below...").
+    1.  First and foremost, use the provided CONTEXT as the foundation and primary source of truth for your answer. If the context is in a different language than the question, you must translate the concepts to answer in the user's language.
+    2.  After using the context, enrich and expand upon this information with your own broader knowledge to provide a more complete, in-depth explanation.
+    3.  The "explanation" value must be a clear, expert-level textual answer to the QUESTION.
+    4.  If the QUESTION explicitly asks for a "plot", "graph", "chart", "visualization", or "diagram", you MUST generate complete, runnable Python code to create that visualization in the "code" value. The code must use Matplotlib and create a figure object named 'fig'.
+    5.  If the QUESTION asks for a non-plotting code example (like a function or a script), you MUST generate that code in the "code" value.
+    6.  If the QUESTION is purely conceptual and does not imply a need for any code, the "code" value MUST be an empty string ("").
+    7.  The "explanation" should be self-contained. Do NOT refer to the code (e.g., do not say "the code below...").
 
     CONTEXT:
     {context}
@@ -63,6 +62,8 @@ def create_chains():
 
     QUESTION:
     {question}
+
+    **FINAL CHECK: Before you generate the JSON, double-check that the 'explanation' is written in the same language as the QUESTION above.**
     """
     rag_prompt = ChatPromptTemplate.from_template(rag_template)
     
@@ -77,7 +78,6 @@ def create_chains():
         | StrOutputParser()
     )
 
-    # --- Chain 2: The Code Explainer ---
     code_explainer_template = """You are an expert Python code explainer.
     The user has provided a piece of code, and I have already run it for you.
     Your task is to explain what the code does, step by step, and present the output.
@@ -100,7 +100,6 @@ def create_chains():
 
     return {"rag": rag_chain, "explainer": code_explainer_chain}
 
-# --- 4. Helper Function for the UI (FIX: Defined only ONCE) ---
 def find_and_parse_json(text: str):
     """Finds and parses the first valid JSON object in a string."""
     try:
@@ -113,7 +112,7 @@ def find_and_parse_json(text: str):
         return None
     return None
 
-# --- 5. The Streamlit User Interface (with corrected display logic) ---
+# Streamlit user interface 
 st.set_page_config(page_title="Data Science Tutor", layout="wide")
 st.title("🎓 Data Science Study Tutor")
 st.markdown("Ask a question, ask for a plot, or paste a block of Python code to have it explained!")
@@ -162,7 +161,6 @@ if user_prompt := st.chat_input("What is your question?"):
             
             is_code_block = bool(re.search(r"^\s*(import|def|for|while|if|#)", user_prompt.strip())) or len(user_prompt.strip().split('\n')) > 1
 
-            # --- ROUTE 1: Handle Code Explanation ---
             if is_code_block:
                 code_to_explain = user_prompt
                 
@@ -193,7 +191,6 @@ if user_prompt := st.chat_input("What is your question?"):
                     st.code(response_str, language="text")
                     st.session_state.messages.append({"role": "assistant", "content": response_str})
 
-            # --- ROUTE 2: Handle RAG Question ---
             else:
                 history_string = ""
                 for message in st.session_state.messages[-5:-1]:

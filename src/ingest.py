@@ -5,13 +5,9 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 import os
 
-# Get the directory of the current script (e.g., .../src)
 script_dir = os.path.dirname(os.path.realpath(__file__))
-
-# Go up one level to the project's root directory (e.g., ...)
 project_root = os.path.dirname(script_dir)
 
-# Define the absolute paths
 DATA_PATH = os.path.join(project_root, 'data')
 DB_FAISS_PATH = os.path.join(project_root, 'vectorstore', 'db_faiss')
 def load_documents(data_path):
@@ -34,8 +30,6 @@ def split_documents(documents):
     """
     Splits the documents into smaller chunks for processing.
     """
-    # For code, we might want a different splitter, but RecursiveCharacterTextSplitter
-    # is robust and will work well enough for this project by splitting along lines and functions.
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     texts = text_splitter.split_documents(documents)
     return texts
@@ -65,10 +59,8 @@ def main():
     print("Starting data ingestion process...")
 
     all_documents = []
-    # This loop needs to be able to go one level deeper for subfolders like 'langchain'
     for root, dirs, files in os.walk(DATA_PATH):
         print(f"Loading documents from: {root}")
-        # Pass the full root path to the loading function
         all_documents.extend(load_documents(root))
 
     if not all_documents:
