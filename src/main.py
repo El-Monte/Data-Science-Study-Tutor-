@@ -14,7 +14,6 @@ import json
 import io
 from contextlib import redirect_stdout
 import re
-import seaborn as sns
 
 load_dotenv()
 matplotlib.use("Agg")
@@ -38,13 +37,18 @@ def create_chains():
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
+    # --- Chain 1: The RAG Tutor and Plotter ---
     rag_template = """
     Your primary function is to act as a JSON API. You MUST respond with a single, valid JSON object and nothing else.
     The JSON object must have two keys: "explanation" and "code".
 
-    You are an expert Data Science tutor. Your goal is to provide a comprehensive, detailed, and insightful answer to the user's QUESTION.
-    **CRITICAL LANGUAGE RULE: Your entire response, including all text in the 'explanation', MUST be in the same language as the user's most recent QUESTION. Disregard the language of the previous CHAT HISTORY when deciding the language for your answer.**
+    You are an expert Data Science tutor. Use the provided CONTEXT and CHAT HISTORY to answer the user's QUESTION.
     
+    --- GUARDRAIL RULES (APPLY THESE FIRST) ---
+    1.  **Analyze the user's QUESTION first.**
+    2.  **If the QUESTION is about data science, statistics, machine learning, programming (Python/R), or a related technical topic, proceed to the INSTRUCTIONS FOR JSON CONTENT.**
+    3.  **If the QUESTION is clearly outside of this domain (e.g., history, sports, geography, art), you MUST refuse to answer.** Your JSON response MUST have an "explanation" field containing only this message: "I apologize, but my knowledge is strictly limited to data science and related topics. I cannot answer questions about general knowledge." The "code" field must be empty. DO NOT use your general knowledge to answer.
+
     **Instructions for JSON content:**
     1.  First and foremost, use the provided CONTEXT as the foundation and primary source of truth for your answer. If the context is in a different language than the question, you must translate the concepts to answer in the user's language.
     2.  After using the context, enrich and expand upon this information with your own broader knowledge to provide a more complete, in-depth explanation.
@@ -100,6 +104,7 @@ def create_chains():
 
     return {"rag": rag_chain, "explainer": code_explainer_chain}
 
+# --- 4. Helper Function for the UI  ---
 def find_and_parse_json(text: str):
     """Finds and parses the first valid JSON object in a string."""
     try:

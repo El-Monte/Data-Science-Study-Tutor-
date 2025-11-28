@@ -3,3 +3,4 @@ venv/
 .env
 __pycache__/
 vectorstore/
+/data/ground_truth_dataset.jsonl
