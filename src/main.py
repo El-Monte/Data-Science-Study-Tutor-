@@ -237,3 +237,237 @@ if user_prompt := st.chat_input("What is your question?"):
                     st.error("I had trouble formatting my response. Here is the raw output:")
                     st.code(response_str, language="text")
                     st.session_state.messages.append({"role": "assistant", "content": response_str})
+
+
+
+# ==========================
+# 📚 PRACTICE MODE SECTION
+# ==========================
+
+def get_practice_models():
+    """
+    Build (once per session) a retriever + LLM for Practice Mode.
+    We reuse the same constants as the main app (DB_FAISS_PATH, EMBEDDING_MODEL, LLM_MODEL),
+    but keep this logic completely separate from the main chat chains.
+    """
+    if "practice_retriever" not in st.session_state:
+        embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={"device": "cpu"}
+        )
+        db = FAISS.load_local(
+            DB_FAISS_PATH,
+            embeddings,
+            allow_dangerous_deserialization=True
+        )
+        st.session_state.practice_retriever = db.as_retriever(search_kwargs={"k": 5})
+
+    if "practice_llm" not in st.session_state:
+        st.session_state.practice_llm = ChatGoogleGenerativeAI(
+            model=LLM_MODEL,
+            temperature=0.2,
+            convert_system_message_to_human=True,
+        )
+
+    return st.session_state.practice_retriever, st.session_state.practice_llm
+
+
+def generate_practice_questions(topic, retriever, llm, n_questions=5):
+    """
+    Generate N practice questions on a given topic, using course material as context.
+    Questions should go from easier (definitions) to harder (reasoning/applications).
+    """
+    docs = retriever.get_relevant_documents(topic)
+    context = "\n\n".join(d.page_content for d in docs[:5])
+
+    prompt = f"""
+You are an expert and friendly Data Science tutor.
+
+A student wants to practice the following topic:
+"{topic}"
+
+You are given some course MATERIAL (CONTEXT).  
+You MUST use this material to understand which concepts to include in the questions,  
+BUT the questions themselves MUST be general, universal, and self-contained.
+
+STRICT RULES FOR QUESTIONS:
+- Do NOT reference “the text”, “the document”, “the material”, “the context”, “the notes”, or any section/chapter/page.
+- Do NOT say “according to the text”, “from the notes”, or anything similar.
+- Each question must be phrased as a standard university exam/quiz question.
+- Questions must be general (e.g., “What is linear regression?” — not “What does the text say linear regression is?”)
+- Start with easy questions (definitions), then medium (reasoning), then hard (applications).
+
+CONTEXT:
+\"\"\"{context}\"\"\"
+
+Generate EXACTLY {n_questions} questions.
+Output MUST be a numbered list:
+1. ...
+2. ...
+3. ...
+
+Now generate the questions.
+"""
+
+    response = llm.invoke(prompt)
+    text = response.content if hasattr(response, "content") else str(response)
+
+    questions = []
+    for line in text.split("\n"):
+        line = line.strip()
+        # very simple parsing for lines like "1. ..." "2. ..."
+        if line and line[0].isdigit() and "." in line[:4]:
+            q = line.split(".", 1)[1].strip()
+            questions.append(q)
+
+    if not questions:
+        questions = [text.strip()]
+
+    return questions[:n_questions]
+
+
+def evaluate_practice_answer(question, student_answer, topic, retriever, llm):
+    """
+    Ask the LLM to evaluate the student's answer using the course context.
+    The feedback starts with 'Score: X/100' and then a short explanation.
+    """
+    docs = retriever.get_relevant_documents(topic + " " + question)
+    context = "\n\n".join(d.page_content for d in docs[:5])
+
+    prompt = f"""
+You are a Data Science teaching assistant.
+
+You are given:
+- some course CONTEXT,
+- a QUESTION,
+- a STUDENT_ANSWER.
+
+Your evaluation MUST follow these rules:
+
+STRICT RULES:
+- DO NOT reference the context or any document.
+- DO NOT say “according to the material”, “according to the notes”, “according to the document”.
+- Evaluate as if you are a professor who *knows the subject*, not someone reading a text.
+- Use ONLY the concepts implied by the context, but NEVER mention that the context exists.
+
+Your output:
+- First line MUST be: "Score: X/100" (with X between 0 and 100).
+- Then write from 5 to 7 short lines explaining:
+  - what is correct,
+  - what is missing or inaccurate,
+  - the correct explanation the student should have given,
+  - how to improve.
+- Tone: friendly but rigorous.
+
+CONTEXT:
+\"\"\"{context}\"\"\"
+
+QUESTION:
+{question}
+
+STUDENT_ANSWER:
+{student_answer}
+"""
+
+    response = llm.invoke(prompt)
+    return response.content if hasattr(response, "content") else str(response)
+
+
+# ---------------------------
+# 🎓 Practice Mode UI (Streamlit)
+# ---------------------------
+
+st.divider()
+st.subheader("📚 Practice Mode (self-assessment)")
+
+# Initialize practice-related state
+if "practice_topic" not in st.session_state:
+    st.session_state.practice_topic = ""
+if "practice_questions" not in st.session_state:
+    st.session_state.practice_questions = []
+if "practice_index" not in st.session_state:
+    st.session_state.practice_index = 0
+if "practice_feedback" not in st.session_state:
+    st.session_state.practice_feedback = ""
+if "practice_answer" not in st.session_state:
+    st.session_state.practice_answer = ""
+
+# Topic input
+st.session_state.practice_topic = st.text_input(
+    "Choose a topic you want to practice (e.g. 'linear regression', 'neural networks', 'variance'):",
+    value=st.session_state.practice_topic,
+)
+
+col_gen, col_reset = st.columns([2, 1])
+
+with col_gen:
+    if st.button("Generate practice questions"):
+        if not st.session_state.practice_topic.strip():
+            st.warning("Please enter a topic before generating questions.")
+        else:
+            retriever, llm = get_practice_models()
+            st.session_state.practice_questions = generate_practice_questions(
+                st.session_state.practice_topic,
+                retriever,
+                llm,
+                n_questions=5,
+            )
+            st.session_state.practice_index = 0
+            st.session_state.practice_feedback = ""
+            st.session_state.practice_answer = ""
+            st.success(f"Generated {len(st.session_state.practice_questions)} questions on: {st.session_state.practice_topic}")
+
+with col_reset:
+    if st.button("Reset Practice Mode"):
+        st.session_state.practice_topic = ""
+        st.session_state.practice_questions = []
+        st.session_state.practice_index = 0
+        st.session_state.practice_feedback = ""
+        st.session_state.practice_answer = ""
+        st.info("Practice Mode has been reset.")
+
+# If we have questions, show the current one
+if st.session_state.practice_questions:
+    idx = st.session_state.practice_index
+    idx_display = idx + 1
+    total = len(st.session_state.practice_questions)
+    current_question = st.session_state.practice_questions[idx]
+
+    st.markdown(f"**Question {idx_display} / {total}:** {current_question}")
+
+    st.session_state.practice_answer = st.text_area(
+        "Your answer:",
+        value=st.session_state.practice_answer,
+        key="practice_answer_area",
+        height=120,
+    )
+
+    col_fb, col_next = st.columns([2, 1])
+
+    with col_fb:
+        if st.button("Get feedback on this answer"):
+            if not st.session_state.practice_answer.strip():
+                st.warning("Please write an answer before asking for feedback.")
+            else:
+                retriever, llm = get_practice_models()
+                feedback = evaluate_practice_answer(
+                    current_question,
+                    st.session_state.practice_answer,
+                    st.session_state.practice_topic,
+                    retriever,
+                    llm,
+                )
+                st.session_state.practice_feedback = feedback
+
+    with col_next:
+        if st.button("Next question"):
+            if st.session_state.practice_index < total - 1:
+                st.session_state.practice_index += 1
+                st.session_state.practice_feedback = ""
+                st.session_state.practice_answer = ""
+            else:
+                st.info("You have reached the last question.")
+
+    if st.session_state.practice_feedback:
+        st.markdown("### 🧠 Tutor feedback")
+        st.markdown(st.session_state.practice_feedback)
