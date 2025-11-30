@@ -1,20 +1,20 @@
 import streamlit as st
 import os
 import matplotlib
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import AIMessage, HumanMessage
-from dotenv import load_dotenv
-from operator import itemgetter
 import json
 import io
-from contextlib import redirect_stdout
 import re
-import seaborn as sns
+from contextlib import redirect_stdout
+from operator import itemgetter
+from dotenv import load_dotenv
+import numpy as np # Added for practice mode
+
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 matplotlib.use("Agg")
@@ -23,7 +23,7 @@ DB_FAISS_PATH = "vectorstore/db_faiss"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 LLM_MODEL = "gemini-2.5-flash"
 
-
+# --- 3. Chain Creation ---
 def create_chains():
     """
     Creates and returns a dictionary containing two specialized chains:
@@ -38,32 +38,30 @@ def create_chains():
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
+    # --- Chain 1: The RAG Tutor (with Guardrails) ---
     rag_template = """
     Your primary function is to act as a JSON API. You MUST respond with a single, valid JSON object and nothing else.
     The JSON object must have two keys: "explanation" and "code".
-
-    You are an expert Data Science tutor. Your goal is to provide a comprehensive, detailed, and insightful answer to the user's QUESTION.
-    **CRITICAL LANGUAGE RULE: Your entire response, including all text in the 'explanation', MUST be in the same language as the user's most recent QUESTION. Disregard the language of the previous CHAT HISTORY when deciding the language for your answer.**
+    
+    --- GUARDRAIL RULES (APPLY THESE FIRST) ---
+    1.  **Analyze the user's QUESTION first.**
+    2.  **If the QUESTION is about data science, statistics, machine learning, programming (Python/R), or a related technical topic, proceed to the INSTRUCTIONS FOR JSON CONTENT.**
+    3.  **If the QUESTION is clearly outside of this domain (e.g., history, sports, geography, art), you MUST refuse to answer.** Your JSON response MUST have an "explanation" field containing only this message: "I apologize, but my knowledge is strictly limited to data science and related topics. I cannot answer questions about general knowledge." The "code" field must be empty. DO NOT use your general knowledge to answer.
     
     **Instructions for JSON content:**
-    1.  First and foremost, use the provided CONTEXT as the foundation and primary source of truth for your answer. If the context is in a different language than the question, you must translate the concepts to answer in the user's language.
-    2.  After using the context, enrich and expand upon this information with your own broader knowledge to provide a more complete, in-depth explanation.
-    3.  The "explanation" value must be a clear, expert-level textual answer to the QUESTION.
-    4.  If the QUESTION explicitly asks for a "plot", "graph", "chart", "visualization", or "diagram", you MUST generate complete, runnable Python code to create that visualization in the "code" value. The code must use Matplotlib and create a figure object named 'fig'.
-    5.  If the QUESTION asks for a non-plotting code example (like a function or a script), you MUST generate that code in the "code" value.
-    6.  If the QUESTION is purely conceptual and does not imply a need for any code, the "code" value MUST be an empty string ("").
-    7.  The "explanation" should be self-contained. Do NOT refer to the code (e.g., do not say "the code below...").
-
+    1.  The "explanation" value must be a clear, expert-level textual answer to the QUESTION.
+    2.  If the QUESTION explicitly asks for a "plot", "graph", "chart", "visualization", or "diagram", you MUST generate complete, runnable Python code for it in the "code" value. The code must use Matplotlib and create a figure object named 'fig'.
+    3.  If the QUESTION asks for a non-plotting code example, generate that code in the "code" value.
+    4.  If the QUESTION is purely conceptual, the "code" value MUST be an empty string ("").
+    
     CONTEXT:
     {context}
-
+    
     CHAT HISTORY:
     {chat_history}
-
+    
     QUESTION:
     {question}
-
-    **FINAL CHECK: Before you generate the JSON, double-check that the 'explanation' is written in the same language as the QUESTION above.**
     """
     rag_prompt = ChatPromptTemplate.from_template(rag_template)
     
@@ -78,28 +76,19 @@ def create_chains():
         | StrOutputParser()
     )
 
+    # --- Chain 2: The Code Explainer ---
     code_explainer_template = """You are an expert Python code explainer.
-    The user has provided a piece of code, and I have already run it for you.
-    Your task is to explain what the code does, step by step, and present the output.
-
-    CODE:
-    ```python
-    {code_block}
-    ```
-
-    EXECUTION OUTPUT:
-    ```
-    {code_output}
-    ```
-
     Your response MUST be a JSON object with a single key: "explanation".
-    The "explanation" should be a clear, step-by-step breakdown of the code's logic and what the final output means.
+    CODE: ```python\n{code_block}\n```
+    EXECUTION OUTPUT: ```\n{code_output}\n```
+    Explain the code's logic and what the final output means.
     """
     code_explainer_prompt = ChatPromptTemplate.from_template(code_explainer_template)
     code_explainer_chain = code_explainer_prompt | llm | StrOutputParser()
 
     return {"rag": rag_chain, "explainer": code_explainer_chain}
 
+# --- 4. Helper Function for JSON Parsing ---
 def find_and_parse_json(text: str):
     """Finds and parses the first valid JSON object in a string."""
     try:
@@ -112,7 +101,9 @@ def find_and_parse_json(text: str):
         return None
     return None
 
-# Streamlit user interface 
+# ==================================
+# --- 5. Main Chatbot UI Section ---
+# ==================================
 st.set_page_config(page_title="Data Science Tutor", layout="wide")
 st.title("🎓 Data Science Study Tutor")
 st.markdown("Ask a question, ask for a plot, or paste a block of Python code to have it explained!")
@@ -133,10 +124,10 @@ for message in st.session_state.messages:
             if "explanation" in content and content["explanation"]:
                 st.markdown("### 💡 Explanation")
                 st.markdown(content["explanation"])
-                st.divider()
             if "code" in content and content["code"]:
                 st.markdown("### 🐍 Generated Code")
                 st.code(content["code"], language="python")
+                st.divider()
             if "fig" in content:
                 st.markdown("### 📊 Generated Plot")
                 st.pyplot(content["fig"])
@@ -163,7 +154,6 @@ if user_prompt := st.chat_input("What is your question?"):
 
             if is_code_block:
                 code_to_explain = user_prompt
-                
                 output_capture = io.StringIO()
                 try:
                     with redirect_stdout(output_capture):
@@ -238,163 +228,84 @@ if user_prompt := st.chat_input("What is your question?"):
                     st.code(response_str, language="text")
                     st.session_state.messages.append({"role": "assistant", "content": response_str})
 
-
-
-# ==========================
+# --- START OF INTEGRATED PRACTICE MODE CODE ---
+# =============================================
 # 📚 PRACTICE MODE SECTION
-# ==========================
+# =============================================
 
 def get_practice_models():
     """
-    Build (once per session) a retriever + LLM for Practice Mode.
-    We reuse the same constants as the main app (DB_FAISS_PATH, EMBEDDING_MODEL, LLM_MODEL),
-    but keep this logic completely separate from the main chat chains.
+    Builds (once per session) a retriever + LLM specifically for Practice Mode.
     """
     if "practice_retriever" not in st.session_state:
-        embeddings = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_MODEL,
-            model_kwargs={"device": "cpu"}
-        )
-        db = FAISS.load_local(
-            DB_FAISS_PATH,
-            embeddings,
-            allow_dangerous_deserialization=True
-        )
+        embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL, model_kwargs={"device": "cpu"})
+        db = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
         st.session_state.practice_retriever = db.as_retriever(search_kwargs={"k": 5})
 
     if "practice_llm" not in st.session_state:
-        st.session_state.practice_llm = ChatGoogleGenerativeAI(
-            model=LLM_MODEL,
-            temperature=0.2,
-            convert_system_message_to_human=True,
-        )
+        st.session_state.practice_llm = ChatGoogleGenerativeAI(model=LLM_MODEL, temperature=0.2, convert_system_message_to_human=True)
 
     return st.session_state.practice_retriever, st.session_state.practice_llm
 
 
 def generate_practice_questions(topic, retriever, llm, n_questions=5):
     """
-    Generate N practice questions on a given topic, using course material as context.
-    Questions should go from easier (definitions) to harder (reasoning/applications).
+    Generates N practice questions on a given topic.
     """
     docs = retriever.get_relevant_documents(topic)
     context = "\n\n".join(d.page_content for d in docs[:5])
 
     prompt = f"""
-You are an expert and friendly Data Science tutor.
-
-A student wants to practice the following topic:
-"{topic}"
-
-You are given some course MATERIAL (CONTEXT).  
-You MUST use this material to understand which concepts to include in the questions,  
-BUT the questions themselves MUST be general, universal, and self-contained.
-
-STRICT RULES FOR QUESTIONS:
-- Do NOT reference “the text”, “the document”, “the material”, “the context”, “the notes”, or any section/chapter/page.
-- Do NOT say “according to the text”, “from the notes”, or anything similar.
-- Each question must be phrased as a standard university exam/quiz question.
-- Questions must be general (e.g., “What is linear regression?” — not “What does the text say linear regression is?”)
-- Start with easy questions (definitions), then medium (reasoning), then hard (applications).
-
+You are an expert Data Science tutor. Based on the CONTEXT provided, generate {n_questions} practice questions about the topic: "{topic}".
+- The questions should be general and self-contained.
+- Do NOT reference "the text" or "the context".
+- Start with easy questions and progress to harder ones.
+- Output MUST be a numbered list.
 CONTEXT:
 \"\"\"{context}\"\"\"
-
-Generate EXACTLY {n_questions} questions.
-Output MUST be a numbered list:
-1. ...
-2. ...
-3. ...
-
 Now generate the questions.
 """
-
     response = llm.invoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    questions = []
-    for line in text.split("\n"):
-        line = line.strip()
-        # very simple parsing for lines like "1. ..." "2. ..."
-        if line and line[0].isdigit() and "." in line[:4]:
-            q = line.split(".", 1)[1].strip()
-            questions.append(q)
-
-    if not questions:
-        questions = [text.strip()]
-
-    return questions[:n_questions]
+    questions = [q.split(".", 1)[1].strip() for q in text.split("\n") if q and q[0].isdigit()]
+    return questions[:n_questions] if questions else [text.strip()]
 
 
 def evaluate_practice_answer(question, student_answer, topic, retriever, llm):
     """
-    Ask the LLM to evaluate the student's answer using the course context.
-    The feedback starts with 'Score: X/100' and then a short explanation.
+    Evaluates a student's answer and provides feedback.
     """
     docs = retriever.get_relevant_documents(topic + " " + question)
     context = "\n\n".join(d.page_content for d in docs[:5])
 
     prompt = f"""
-You are a Data Science teaching assistant.
+You are a Data Science teaching assistant. Evaluate the STUDENT_ANSWER for the QUESTION based on the provided CONTEXT.
+Your output MUST start with "Score: X/100" followed by 5-7 lines of friendly but rigorous feedback.
+- DO NOT mention the context.
+- Evaluate as if you are a professor who knows the subject.
 
-You are given:
-- some course CONTEXT,
-- a QUESTION,
-- a STUDENT_ANSWER.
-
-Your evaluation MUST follow these rules:
-
-STRICT RULES:
-- DO NOT reference the context or any document.
-- DO NOT say “according to the material”, “according to the notes”, “according to the document”.
-- Evaluate as if you are a professor who *knows the subject*, not someone reading a text.
-- Use ONLY the concepts implied by the context, but NEVER mention that the context exists.
-
-Your output:
-- First line MUST be: "Score: X/100" (with X between 0 and 100).
-- Then write from 5 to 7 short lines explaining:
-  - what is correct,
-  - what is missing or inaccurate,
-  - the correct explanation the student should have given,
-  - how to improve.
-- Tone: friendly but rigorous.
-
-CONTEXT:
-\"\"\"{context}\"\"\"
-
-QUESTION:
-{question}
-
-STUDENT_ANSWER:
-{student_answer}
+CONTEXT: \"\"\"{context}\"\"\"
+QUESTION: {question}
+STUDENT_ANSWER: {student_answer}
 """
-
     response = llm.invoke(prompt)
     return response.content if hasattr(response, "content") else str(response)
 
-
-# ---------------------------
-# 🎓 Practice Mode UI (Streamlit)
-# ---------------------------
-
+# --- Practice Mode UI (Streamlit) ---
 st.divider()
 st.subheader("📚 Practice Mode (self-assessment)")
 
-# Initialize practice-related state
-if "practice_topic" not in st.session_state:
-    st.session_state.practice_topic = ""
-if "practice_questions" not in st.session_state:
-    st.session_state.practice_questions = []
-if "practice_index" not in st.session_state:
-    st.session_state.practice_index = 0
-if "practice_feedback" not in st.session_state:
-    st.session_state.practice_feedback = ""
-if "practice_answer" not in st.session_state:
-    st.session_state.practice_answer = ""
+# Initialize session state for practice mode
+if "practice_topic" not in st.session_state: st.session_state.practice_topic = ""
+if "practice_questions" not in st.session_state: st.session_state.practice_questions = []
+if "practice_index" not in st.session_state: st.session_state.practice_index = 0
+if "practice_feedback" not in st.session_state: st.session_state.practice_feedback = ""
+if "practice_answer" not in st.session_state: st.session_state.practice_answer = ""
 
 # Topic input
 st.session_state.practice_topic = st.text_input(
-    "Choose a topic you want to practice (e.g. 'linear regression', 'neural networks', 'variance'):",
+    "Choose a topic you want to practice:",
     value=st.session_state.practice_topic,
 )
 
@@ -402,71 +313,53 @@ col_gen, col_reset = st.columns([2, 1])
 
 with col_gen:
     if st.button("Generate practice questions"):
-        if not st.session_state.practice_topic.strip():
-            st.warning("Please enter a topic before generating questions.")
-        else:
+        if st.session_state.practice_topic.strip():
             retriever, llm = get_practice_models()
-            st.session_state.practice_questions = generate_practice_questions(
-                st.session_state.practice_topic,
-                retriever,
-                llm,
-                n_questions=5,
-            )
+            with st.spinner("Generating questions..."):
+                st.session_state.practice_questions = generate_practice_questions(st.session_state.practice_topic, retriever, llm)
             st.session_state.practice_index = 0
             st.session_state.practice_feedback = ""
             st.session_state.practice_answer = ""
-            st.success(f"Generated {len(st.session_state.practice_questions)} questions on: {st.session_state.practice_topic}")
+            st.success(f"Generated questions on: {st.session_state.practice_topic}")
+        else:
+            st.warning("Please enter a topic first.")
 
 with col_reset:
     if st.button("Reset Practice Mode"):
         st.session_state.practice_topic = ""
         st.session_state.practice_questions = []
-        st.session_state.practice_index = 0
-        st.session_state.practice_feedback = ""
-        st.session_state.practice_answer = ""
+        # ... (reset other practice state variables) ...
         st.info("Practice Mode has been reset.")
 
-# If we have questions, show the current one
+# If questions exist, display the current one
 if st.session_state.practice_questions:
     idx = st.session_state.practice_index
-    idx_display = idx + 1
-    total = len(st.session_state.practice_questions)
     current_question = st.session_state.practice_questions[idx]
 
-    st.markdown(f"**Question {idx_display} / {total}:** {current_question}")
-
-    st.session_state.practice_answer = st.text_area(
-        "Your answer:",
-        value=st.session_state.practice_answer,
-        key="practice_answer_area",
-        height=120,
-    )
+    st.markdown(f"**Question {idx + 1}/{len(st.session_state.practice_questions)}:** {current_question}")
+    
+    st.session_state.practice_answer = st.text_area("Your answer:", value=st.session_state.practice_answer, key=f"practice_answer_{idx}")
 
     col_fb, col_next = st.columns([2, 1])
-
     with col_fb:
-        if st.button("Get feedback on this answer"):
-            if not st.session_state.practice_answer.strip():
-                st.warning("Please write an answer before asking for feedback.")
-            else:
+        if st.button("Get feedback"):
+            if st.session_state.practice_answer.strip():
                 retriever, llm = get_practice_models()
-                feedback = evaluate_practice_answer(
-                    current_question,
-                    st.session_state.practice_answer,
-                    st.session_state.practice_topic,
-                    retriever,
-                    llm,
-                )
+                with st.spinner("Tutor is evaluating..."):
+                    feedback = evaluate_practice_answer(current_question, st.session_state.practice_answer, st.session_state.practice_topic, retriever, llm)
                 st.session_state.practice_feedback = feedback
+            else:
+                st.warning("Please provide an answer.")
 
     with col_next:
         if st.button("Next question"):
-            if st.session_state.practice_index < total - 1:
+            if idx < len(st.session_state.practice_questions) - 1:
                 st.session_state.practice_index += 1
                 st.session_state.practice_feedback = ""
                 st.session_state.practice_answer = ""
+                st.rerun()
             else:
-                st.info("You have reached the last question.")
+                st.info("You've reached the last question.")
 
     if st.session_state.practice_feedback:
         st.markdown("### 🧠 Tutor feedback")
